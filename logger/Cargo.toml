@@ -1,0 +1,10 @@
+[package]
+name = "logger"
+version = "0.1.0"
+authors = ["imger"]
+
+[dependencies]
+game_sdk = {path = "../game_sdk"}
+serde = "1.0.82"
+serde_derive = "1.0.82"
+serde_json = "1.0.33"

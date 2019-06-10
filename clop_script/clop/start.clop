@@ -1,0 +1,61 @@
+#
+# start.clop
+#
+# experiment definition
+#
+
+# Name (used for .log and .dat files)
+Name start
+
+# Script for running a game. See DummyScript.py for details.
+Script ./minimax.exe
+
+# Parameter(s) to be optimized
+# <parameter_type> <name> <min> <max>
+# <parameter_type> may be:
+#  LinearParameter
+#  IntegerParameter
+#  GammaParameter
+#  IntegerGammaParameter
+# For GammaParameter, quadratic regression is performed on log(x)
+# Warning: 123 and not 123.0 should be used for IntegerParameter
+LinearParameter aspiration_window 0.0 10.0
+LinearParameter adj_distances_start -10.0 10.0
+LinearParameter adj_distances_end -10.0 10.0
+LinearParameter swarm_start -10.0 10.0
+LinearParameter swarm_end -10.0 10.0
+LinearParameter adj_center_start -10.0 10.0
+LinearParameter adj_center_end -10.0 10.0
+LinearParameter adj_border_start -10.0 10.0
+LinearParameter adj_border_end -10.0 10.0
+LinearParameter count_start -10.0 10.0
+LinearParameter count_end -10.0 10.0
+
+# This could be the list of machine names in a distributed experiment.
+# In order to run 6 games in parallel, all on local:
+Processor local
+Processor local
+Processor local
+Processor local
+Processor local
+Processor local
+
+# Call the script "Replications" times in a row with identical parameter values
+# Replications may be used to alternate colors, for instance.
+# Seed % Replications would indicate color.
+Replications 4
+
+# Parameters of statistical model of outcome
+# For binary outcome (Win/Loss, no draws), use "DrawElo 0"
+# For chess, use "DrawElo 100"
+DrawElo 100
+
+# Regression parameters
+# H 3 is recommended (it is the default value)
+# Correlations may be "all" (default) or "none"
+# Even if variables are not correlated "all" should work well. The problem is
+# that the regression might become very costly if the number of variables is
+# high. So use "Correlations none" only if you are certain parameters are
+# independent or you have so many variables that "all" is too costly.
+H 3
+Correlations all

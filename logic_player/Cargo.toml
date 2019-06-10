@@ -1,0 +1,21 @@
+[package]
+name = "logic_player"
+version = "0.1.0"
+authors = ["imger"]
+
+[dependencies]
+game_sdk = {path = "../game_sdk"}
+logger = {path = "../logger"}
+rand = "*"
+time = "^0.1"
+hashbrown = "0.1"
+failure = "0.1"
+priority-queue = "0.5.2"
+#[target.'x86_64-unknown-linux-gnu'.dependencies.tensorflow]
+#version = "0.12.0"
+#[target.'x86_64-unknown-linux-musl'.dependencies.tensorflow]
+#version = "0.12.0"
+#[target.'x86_64-unknown-linux-gnu'.dependencies.tflite]
+#version = "0.1.1"
+#[target.'x86_64-unknown-linux-musl'.dependencies.tflite]
+#version = "0.1.1"

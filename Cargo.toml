@@ -1,0 +1,20 @@
+[workspace]
+members = [
+    "game_sdk",
+    "simulator",
+    "xml_client",
+    "logic_player",
+    "logger",
+    "perft",
+    "clop_script"
+]
+
+[profile.dev]
+opt-level = 3
+debug = true
+codegen-units = 1
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+lto = true

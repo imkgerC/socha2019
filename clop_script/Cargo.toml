@@ -1,0 +1,9 @@
+[package]
+name = "clop_script"
+version = "0.1.0"
+authors = ["imger"]
+edition = "2018"
+
+[dependencies]
+game_sdk = { path = "../game_sdk"}
+logic_player = { path = "../logic_player" }

@@ -1,0 +1,11 @@
+[package]
+name = "perft"
+version = "0.1.0"
+authors = ["imger"]
+edition = "2018"
+
+[dependencies]
+game_sdk = {path = "../game_sdk"}
+argparse = "0.2.2"
+time = "0.1"
+logic_player = { path = "../logic_player" }

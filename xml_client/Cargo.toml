@@ -1,0 +1,11 @@
+[package]
+name = "xml_client"
+version = "0.1.0"
+authors = ["imger"]
+
+[dependencies]
+xml-rs = "0.7"
+game_sdk = { path = "../game_sdk"}
+logic_player = { path = "../logic_player" }
+argparse = "0.2.2"
+time = "^0.1"
