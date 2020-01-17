@@ -2,13 +2,12 @@ use super::piranhas::{MinimalState, Piranhas};
 use game_sdk::Move;
 use game_sdk::PlayerColor;
 use hashbrown::HashMap;
-use std::cmp::{max, min};
 use std::f32;
 use std::i32;
 
 use crate::LogicBasedPlayer;
 
-fn varianced_playout(initial: &Piranhas, color: &PlayerColor) -> f32 {
+/*fn varianced_playout(initial: &Piranhas, color: &PlayerColor) -> f32 {
     let mut game = initial.clone();
     while !game.is_finished() {
         // let mut potential_moves = game.allowed_actions().into_iter();
@@ -22,26 +21,63 @@ fn varianced_playout(initial: &Piranhas, color: &PlayerColor) -> f32 {
         }
     }
     return game.reward(color);
+}*/
+
+fn varianced_playout(
+    initial: &Piranhas,
+    color: &PlayerColor,
+    rave_table: &mut HashMap<Move, Value>,
+) -> f32 {
+    let mut game = initial.clone();
+    if game.is_finished() {
+        return game.reward(color);
+    }
+    if let Some(action) = LogicBasedPlayer::on_state(&game.state) {
+        game.make_move(&action);
+        let val = varianced_playout(&game, color, rave_table);
+        let mut rave = rave_table.remove(&action).unwrap_or(Value::new());
+        rave.n += 1.;
+        rave.q += if initial.get_color() != *color {
+            val
+        } else {
+            1. - val
+        };
+        rave_table.insert(action.clone(), rave);
+        return val;
+    } else {
+        if *color == game.get_color() {
+            return 0.0;
+        }
+        return 1.0;
+    }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum NodeState {
-    LeafNode,
-    FullyExpanded,
-    Expandable,
+#[derive(Copy, Clone, Debug)]
+struct ChildEdge {
+    pub index: MinimalState,
+    pub action: Move,
+    pub added: bool,
 }
 
-impl std::fmt::Display for NodeState {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                NodeState::LeafNode => "LeafNode",
-                NodeState::FullyExpanded => "FullyExpanded",
-                NodeState::Expandable => "Expandable",
-            }
-        )
+impl ChildEdge {
+    pub fn new(index: MinimalState, action: Move, added: bool) -> ChildEdge {
+        return ChildEdge {
+            index,
+            action,
+            added,
+        };
+    }
+}
+
+#[derive(Clone, Debug, Copy)]
+pub struct Value {
+    pub q: f32,
+    pub n: f32,
+}
+
+impl Value {
+    pub fn new() -> Value {
+        return Value { n: 0., q: 0. };
     }
 }
 
@@ -49,13 +85,16 @@ impl std::fmt::Display for NodeState {
 pub struct TreeNode {
     index: MinimalState,
     parents: Vec<MinimalState>,
-    children: Vec<(MinimalState, Move, bool)>, // next steps we investigated
-    state: NodeState,                          // is this a leaf node? fully expanded?
+    children: Vec<ChildEdge>, // next steps we investigated
+    is_leaf: bool,            // is this a leaf node? fully expanded?
     color: PlayerColor,
     n: f32,
     q: f32, // statistics for this game state
+    n_since_last_expansion: f32,
     lower_bound: f32,
+    last_update: u64,
     depth: Option<u8>,
+    stats: Option<(i32, i32, i32)>,
 }
 
 impl TreeNode {
@@ -71,84 +110,213 @@ impl TreeNode {
             index,
             parents,
             children: Vec::new(),
-            state: NodeState::Expandable,
+            is_leaf: false,
             color: color,
             n: 0.,
             q: 0.,
             lower_bound: -2.0,
             depth: None,
+            stats: None,
+            n_since_last_expansion: 1.,
+            last_update: 0,
         }
     }
 
     /// Gather some statistics about this subtree
-    pub fn tree_statistics(&self, node_table: &HashMap<MinimalState, TreeNode>) -> TreeStatistics {
-        let child_stats = self
-            .children
-            .iter()
-            .map(|(c, _, _)| {
-                if let Some(c) = node_table.get(&c) {
-                    c.tree_statistics(node_table)
-                } else {
-                    TreeStatistics::empty()
-                }
-            })
-            .collect::<Vec<_>>();
-        TreeStatistics::merge(child_stats)
+    pub fn tree_statistics(
+        &mut self,
+        node_table: &mut HashMap<MinimalState, TreeNode>,
+    ) -> (i32, i32, i32) {
+        if let Some(stats) = self.stats {
+            return stats;
+        }
+        let mut nodes = 1;
+        let mut max_depth = 0;
+        let mut min_depth = 200;
+        for c in &self.children {
+            if let Some(mut child) = node_table.remove(&c.index) {
+                let (n, max, min) = child.tree_statistics(node_table);
+                nodes += n;
+                max_depth = i32::max(max, max_depth);
+                min_depth = i32::min(min, min_depth);
+                node_table.insert(c.index, child);
+            }
+        }
+        if nodes == 1 {
+            return (1, 0, 0);
+        }
+        self.stats = Some((nodes, max_depth + 1, min_depth + 1));
+        return (nodes, max_depth + 1, min_depth + 1);
     }
 
-    /// Find the best child accoring to UCT1
-    pub fn best_child(
+    fn add_own_children(&mut self, game: &mut Piranhas) -> bool {
+        let mut rated_actions = LogicBasedPlayer::get_rated_moves(&game.state);
+        if rated_actions.len() == 0 {
+            self.is_leaf = true;
+            self.depth = Some(0);
+            return false;
+        }
+        rated_actions.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for (_, action) in rated_actions {
+            let mut game_clone = game.clone();
+            game_clone.make_move(&action);
+            let state = MinimalState::from_state(&game_clone.state);
+            self.children.push(ChildEdge::new(state, action, false));
+        }
+        return true;
+    }
+
+    pub fn best_child_fpu(
         &mut self,
+        game: &mut Piranhas,
         c: f32,
-        node_table: &HashMap<MinimalState, TreeNode>,
-    ) -> Option<(MinimalState, Move)> {
+        node_table: &mut HashMap<MinimalState, TreeNode>,
+        rave_table: &mut HashMap<Move, Value>,
+        is_root: bool,
+    ) -> (f32, f32) {
+        let color = game.get_color();
+        // child generation
+        if self.children.len() == 0 {
+            if !self.add_own_children(game) {
+                return (game.reward(&color), 1.0);
+            }
+        }
+
+        let mut n = 0.0;
+        let mut q = 0.0;
+
+        let fpu_r = -0.261;
+        let fpu_base = if is_root {
+            1.5
+        } else {
+            (self.n - self.q) / self.n - fpu_r
+        };
+        let fpu_exploration = (self.n.ln() / 1.).sqrt();
         let mut best_value: f32 = f32::NEG_INFINITY;
-        let mut best_child: Option<(MinimalState, Move)> = None;
-        let c_base = 19652.;
-        let c = c + ((1. + self.n + c_base) / c_base).ln();
-
+        let mut best_child_index: Option<usize> = None;
+        let c_base = 7000.;
+        let b_squared = 0.788;
+        let c = c + 0.589 * ((1. + self.n + c_base) / c_base).ln();
         let mut non_terminal = 0;
-        for (child_idx, action, _) in &self.children {
-            let child = node_table
-                .get(child_idx)
+        for (idx, edge) in self.children.iter_mut().enumerate() {
+            if !edge.added {
+                if let Some(node) = node_table.get_mut(&edge.index) {
+                    node.add_parent(self.index);
+                    n += node.n;
+                    q += node.n - node.q;
+                    edge.added = true;
+                } else {
+                    non_terminal += 1;
+                    let rave = rave_table.remove(&edge.action).unwrap_or(Value::new());
+                    let beta =
+                        f32::min(rave.n / (rave.n + 10. + 4. * b_squared * rave.n * 10.), 1.0);
+                    let value =
+                        (1. - beta) * fpu_base + c * fpu_exploration + beta * (rave.q / rave.n);
+                    if value > best_value || best_child_index == None {
+                        best_child_index = Some(idx);
+                        best_value = value;
+                    }
+                    rave_table.insert(edge.action.clone(), rave);
+                    continue;
+                }
+            }
+            let node = node_table
+                .get(&edge.index)
                 .expect("ERROR: Did not find child in UCT");
-
-            if child.state == NodeState::LeafNode {
-                let value = child.q / child.n;
+            if node.is_leaf {
+                let value = node.q / node.n;
                 self.lower_bound = f32::max(self.lower_bound, value);
                 if value > 0.5 {
-                    self.state = NodeState::LeafNode;
+                    self.is_leaf = true;
                     self.q = (1. - value) * self.n;
-                    self.depth = Some(child.depth.unwrap_or(0) + 1);
-                    return Some((*child_idx, *action));
+                    self.depth = Some(node.depth.unwrap_or(0) + 1);
+                    return (self.q / self.n, 1.0);
                 }
             } else {
                 non_terminal += 1;
-                let value = child.q / child.n + c * (2. * self.n.ln() / child.n).sqrt();
-                if value >= best_value || best_child == None {
+                let rave = rave_table.remove(&edge.action).unwrap_or(Value::new());
+                let beta = f32::min(
+                    rave.n / (rave.n + node.n + 4. * b_squared * rave.n * node.n),
+                    1.0,
+                );
+                let value = (1. - beta) * (node.q / node.n)
+                    + c * (2. * self.n.ln() / node.n).sqrt()
+                    + beta * (rave.q / rave.n);
+                if value > best_value || best_child_index == None {
                     best_value = value;
-                    best_child = Some((*child_idx, *action));
+                    best_child_index = Some(idx);
                 }
+                rave_table.insert(edge.action.clone(), rave);
             }
         }
         if non_terminal == 0 {
-            self.state = NodeState::LeafNode;
+            self.is_leaf = true;
             best_value = self.lower_bound;
-            best_child = None;
-            for (child_idx, action, _) in &self.children {
+            for c in &self.children {
                 let child = node_table
-                    .get(child_idx)
+                    .get(&c.index)
                     .expect("ERROR: Did not find child in UCT");
                 let value = child.q / child.n;
-                if value >= best_value || best_child == None {
+                if value >= best_value {
                     best_value = value;
-                    best_child = Some((*child_idx, *action));
                     self.depth = Some(child.depth.unwrap_or(0) + 1);
                 }
             }
             self.q = (1. - best_value) * self.n;
+            return (self.q / self.n, 1.0);
         }
-        return best_child;
+        if let Some(idx) = best_child_index {
+            let edge = self
+                .children
+                .get_mut(idx)
+                .expect("Should never happen, index is from iteration");
+            if !edge.added {
+                self.n_since_last_expansion = 1.;
+                edge.added = true;
+                let mut node = TreeNode::new(
+                    self.color.get_opponent_color(),
+                    edge.index.clone(),
+                    Some(self.index),
+                );
+                game.make_move(&edge.action);
+                let delta = varianced_playout(game, &node.color, rave_table);
+                n += 1.0;
+                q += 1.0 - delta;
+                node.backpropagate(delta, 1.0, node_table);
+                node_table.insert(edge.index.clone(), node);
+                if let Some(val) = rave_table.get_mut(&edge.action) {
+                    val.n += 1.;
+                    val.q += delta;
+                } else {
+                    let mut val = Value::new();
+                    val.q = delta;
+                    val.n = 1.;
+                    rave_table.insert(edge.action.clone(), val);
+                }
+                return (q, n);
+            }
+            let mut child = node_table
+                .remove(&edge.index)
+                .expect("ERROR: Did not find child in iteration");
+            game.make_move(&edge.action);
+            let (delta, delta_n) = child.iteration(game, c, node_table, rave_table, false);
+            q += delta_n - delta;
+            n += delta_n;
+            node_table.insert(edge.index, child);
+            if let Some(val) = rave_table.get_mut(&edge.action) {
+                val.n += delta_n;
+                val.q += delta;
+            } else {
+                let mut val = Value::new();
+                val.q = delta;
+                val.n = delta_n;
+                rave_table.insert(edge.action.clone(), val);
+            }
+            self.n_since_last_expansion += 1.;
+            return (q, n);
+        } else {
+            panic!("wut");
+        }
     }
 
     pub fn add_parent(&mut self, index: MinimalState) {
@@ -174,10 +342,10 @@ impl TreeNode {
             return false;
         }
         if self.parents.len() == 0 {
-            for (child, _, _) in self.children.iter_mut() {
-                if let Some(mut node) = node_table.remove(child) {
+            for child in self.children.iter_mut() {
+                if let Some(mut node) = node_table.remove(&child.index) {
                     if node.remove_parent(self.index, node_table) == false {
-                        node_table.insert(child.clone(), node);
+                        node_table.insert(child.index.clone(), node);
                     }
                 }
             }
@@ -186,93 +354,13 @@ impl TreeNode {
         return false;
     }
 
-    pub fn expand_evaluate(
-        &mut self,
-        game: &mut Piranhas,
-        c: f32,
-        node_table: &mut HashMap<MinimalState, TreeNode>,
-    ) -> (f32, f32) {
-        let color = game.get_color();
-        if self.children.len() == 0 {
-            let allowed_actions = game.allowed_actions();
-            if allowed_actions.len() == 0 {
-                self.state = NodeState::LeafNode;
-                self.depth = Some(0);
-                return (game.reward(&color), 1.0);
-            }
-            for action in allowed_actions {
-                let mut game_clone = game.clone();
-                game_clone.make_move(&action);
-                let state = MinimalState::from_state(&game_clone.state);
-                self.children.push((state, action, false));
-            }
-        }
-        let mut candidate_indices = Vec::new();
-        let mut n = 0.0;
-        let mut q = 0.0;
-        for (i, (child_idx, _, added)) in self.children.iter_mut().enumerate() {
-            if *added {
-                continue;
-            }
-            if let Some(mut node) = node_table.get_mut(child_idx) {
-                node.add_parent(self.index);
-                n += node.n;
-                q += node.n - node.q;
-                *added = true;
-            } else {
-                candidate_indices.push(i);
-            }
-        }
-        // self.backpropagate(q, n, node_table);
-        if candidate_indices.len() == 1 {
-            self.state = NodeState::FullyExpanded;
-        }
-        if candidate_indices.len() == 0 {
-            self.state = NodeState::FullyExpanded;
-            // Choose and recurse into child...
-            let (child_idx, action) = self
-                .best_child(c, node_table)
-                .expect(&format!("Did not find best child in expansion"));
-            let mut child = node_table
-                .remove(&child_idx)
-                .expect("ERROR: Did not find child in iteration");
-            game.make_move(&action);
-            let (delta, delta_n) = child.iteration(game, c, node_table);
-            q += delta_n - delta;
-            n += delta_n;
-            node_table.insert(child_idx, child);
-            return (q, n);
-        }
-        let index = *candidate_indices.get(0).expect("Should never happen, is checked");// *choose_random(&candidate_indices);
-        self.children
-            .get_mut(index)
-            .expect("ERROR: Did not find child for flagging")
-            .2 = true;
-        let (state, action, _) = self
-            .children
-            .get(index)
-            .expect("ERROR: Did not find child in expansion");
-        let mut node = TreeNode::new(
-            self.color.get_opponent_color(),
-            state.clone(),
-            Some(self.index),
-        );
-
-        game.make_move(&action);
-        let delta = varianced_playout(game, &node.color);
-        n += 1.0;
-        q += 1.0 - delta;
-        node.backpropagate(delta, 1.0, node_table);
-        node_table.insert(state.clone(), node);
-        return (q, n);
-    }
-
     pub fn backpropagate(
         &mut self,
         q: f32,
         n: f32,
         node_table: &mut HashMap<MinimalState, TreeNode>,
     ) {
+        self.stats = None;
         let value = q / n;
         let value = f32::min(1. - self.lower_bound, value);
         self.q += value * n;
@@ -286,34 +374,18 @@ impl TreeNode {
     }
 
     /// Recursively perform an MCTS iteration.
-    ///
-    /// XXX A non-recursive implementation would probably be faster.
-    /// XXX But how to keep &mut pointers to all our parents while
-    /// XXX we fiddle with our leaf node?
     pub fn iteration(
         &mut self,
         game: &mut Piranhas,
         c: f32,
         node_table: &mut HashMap<MinimalState, TreeNode>,
+        rave_table: &mut HashMap<Move, Value>,
+        is_root: bool,
     ) -> (f32, f32) {
-        let (delta, n) = match self.state {
-            // NodeState::LeafNode => (game.reward(&self.color), 1.0),
-            NodeState::LeafNode => (self.q / self.n, 1.0),
-            NodeState::FullyExpanded => {
-                // Choose and recurse into child...
-                let (child_idx, action) = self.best_child(c, node_table).expect(&format!(
-                    "Did not find best child, len of childs {}",
-                    self.children.len()
-                ));
-                let mut child = node_table
-                    .remove(&child_idx)
-                    .expect("ERROR: Did not find child in iteration");
-                game.make_move(&action);
-                let (q, n) = child.iteration(game, c, node_table);
-                node_table.insert(child_idx, child);
-                (n - q, n)
-            }
-            NodeState::Expandable => self.expand_evaluate(game, c, node_table),
+        self.stats = None;
+        let (delta, n) = match self.is_leaf {
+            true => (self.q / self.n, 1.0),
+            false => self.best_child_fpu(game, c, node_table, rave_table, is_root),
         };
         self.backpropagate(delta, n, node_table);
         return (delta, n);
@@ -329,31 +401,12 @@ pub struct TreeStatistics {
 }
 
 impl TreeStatistics {
-    pub fn empty() -> TreeStatistics {
+    pub fn filled(nodes: i32, max_depth: i32, min_depth: i32) -> TreeStatistics {
         return TreeStatistics {
-            nodes: 1,
-            min_depth: 0,
-            max_depth: 0,
+            nodes,
+            min_depth,
+            max_depth,
         };
-    }
-    fn merge(child_stats: Vec<TreeStatistics>) -> TreeStatistics {
-        if child_stats.len() == 0 {
-            TreeStatistics {
-                nodes: 1,
-                min_depth: 0,
-                max_depth: 0,
-            }
-        } else {
-            TreeStatistics {
-                nodes: child_stats.iter().fold(0, |sum, child| sum + child.nodes),
-                min_depth: 1 + child_stats
-                    .iter()
-                    .fold(i32::MAX, |depth, child| min(depth, child.min_depth)),
-                max_depth: 1 + child_stats
-                    .iter()
-                    .fold(0, |depth, child| max(depth, child.max_depth)),
-            }
-        }
     }
 }
 
@@ -363,13 +416,14 @@ pub struct MCTS {
     game: Piranhas,
     pub iterations_per_s: f32,
     node_table: HashMap<MinimalState, TreeNode>,
+    rave_table: HashMap<Move, Value>,
 }
 
 impl MCTS {
     /// Create a new MCTS solver.
     pub fn new(game: &Piranhas) -> MCTS {
         let color = game.get_color();
-        let mut node_table = HashMap::new();
+        let mut node_table = HashMap::with_capacity(100_000);
         let state = MinimalState::from_state(&game.state);
         node_table.insert(
             state,
@@ -380,6 +434,7 @@ impl MCTS {
             game: game.clone(),
             iterations_per_s: 1.,
             node_table,
+            rave_table: HashMap::with_capacity(100_000),
         }
     }
 
@@ -402,11 +457,12 @@ impl MCTS {
         if let Some(mut node) = self.node_table.remove(&state) {
             node.add_parent(MinimalState::empty());
             if node.children.len() == 0 {
-                node.state == NodeState::Expandable;
+                node.is_leaf = false;
             }
             self.root = state;
             self.node_table.insert(state, node);
         } else {
+            self.node_table = HashMap::with_capacity(100_000);
             let color = game.get_color();
             self.root = state;
             self.node_table.insert(
@@ -426,13 +482,14 @@ impl MCTS {
     }
 
     /// Return basic statistical data about the current MCTS tree.
-    pub fn tree_statistics(&self) -> TreeStatistics {
-        let root = self
+    pub fn tree_statistics(&mut self) -> TreeStatistics {
+        let mut root = self
             .node_table
-            .get(&self.root)
+            .remove(&self.root)
             .expect("ERROR: Did not find root for statistics");
-        let child_stats = root.tree_statistics(&self.node_table);
-        return TreeStatistics::merge(vec![child_stats]);
+        let (nodes, max_depth, min_depth) = root.tree_statistics(&mut self.node_table);
+        self.node_table.insert(self.root, root);
+        return TreeStatistics::filled(nodes, max_depth, min_depth);
     }
 
     /// Perform n_samples MCTS iterations.
@@ -443,7 +500,13 @@ impl MCTS {
                 .remove(&self.root)
                 .expect("ERROR: Did not find root in search");
             let mut this_game = self.game.clone();
-            root.iteration(&mut this_game, c, &mut self.node_table);
+            root.iteration(
+                &mut this_game,
+                c,
+                &mut self.node_table,
+                &mut self.rave_table,
+                true,
+            );
             self.node_table.insert(self.root, root);
         }
     }
@@ -454,8 +517,8 @@ impl MCTS {
         let mut samples_total = 0;
         let t0 = time::now();
 
-        let mut n_samples = 10; // (self.iterations_per_s * budget_seconds).max(10.).min(100.) as usize;
-        while n_samples > 9 {
+        let mut n_samples = 20;
+        while n_samples > 19 {
             self.search(n_samples, c);
             samples_total += n_samples;
 
@@ -463,7 +526,7 @@ impl MCTS {
             self.iterations_per_s = samples_total as f32 / time_spend;
 
             let time_left = budget_seconds - time_spend;
-            n_samples = (self.iterations_per_s * time_left).max(0.).min(10.) as usize;
+            n_samples = (self.iterations_per_s * time_left).max(0.).min(20.) as usize;
         }
     }
 
@@ -477,18 +540,18 @@ impl MCTS {
             .node_table
             .get(&self.root)
             .expect("ERROR: Did not find root for best action");
-        for (child_idx, action, _) in &root.children {
-            if let Some(child) = self.node_table.get(child_idx) {
+        for c in &root.children {
+            if let Some(child) = self.node_table.get(&c.index) {
                 let q = child.q;
                 let n = child.n;
                 let value = q / n;
-                if child.state == NodeState::LeafNode {
+                if child.is_leaf {
                     if value > 0.5 {
-                        return (Some(action.clone()), value, child.depth);
+                        return (Some(c.action.clone()), value, child.depth);
                     }
                 }
                 if value >= best_value || best_action == None {
-                    best_action = Some(action.clone());
+                    best_action = Some(c.action.clone());
                     best_value = value;
                     depth = child.depth;
                 }
@@ -504,10 +567,10 @@ impl MCTS {
             .node_table
             .get(&self.root)
             .expect("ERROR: Did not find root for pairs");
-        for (child_idx, action, _) in &root.children {
-            if let Some(child) = self.node_table.get(child_idx) {
+        for c in &root.children {
+            if let Some(child) = self.node_table.get(&c.index) {
                 let value = child.n / root.n;
-                ret_val.push((value, action.clone()));
+                ret_val.push((value, c.action.clone()));
             }
         }
         return ret_val;

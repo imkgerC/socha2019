@@ -6,9 +6,9 @@ use game_sdk::logging::{Data, EndState, Winner};
 use rand::{thread_rng, Rng};
 use xml_utils;
 
-use logic_player::MinimaxPlayer as PlayerOne;
+use logic_player::RavePlayer as PlayerOne;
 
-use logic_player::LegacyMinimaxPlayer as PlayerTwo;
+use logic_player::LegacyRavePlayer as PlayerTwo;
 
 use std::fs;
 use std::sync::mpsc;
@@ -175,7 +175,7 @@ pub fn collect_data(
     let mut player = logic_player::MinimaxPlayer::new(Some(t_log.clone()), index as i64);
     #[cfg(unix)]
     let mut player = logic_player::MinimaxPlayer::new(Some(t_log.clone()), index as i64);
-    let mut random_player = logic_player::RandomPlayer::new(None, 0);
+    let mut random_player = logic_player::LogicBasedPlayer::new(None, 0);
     let mut state = gamerules::get_random_state();
     loop {
         if state.turn % 2 == 0 {

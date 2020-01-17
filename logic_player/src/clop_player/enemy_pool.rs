@@ -1,5 +1,6 @@
 use super::player::{MinimaxParameters, MinimaxPlayer};
-use super::rave_player::{RaveParameters, RavePlayer};
+use super::rave_player::RavePlayer;
+use super::mcts::RaveParameters;
 use game_sdk::{ClientListener, GameState, Move};
 
 const MINIMAX: MinimaxParameters = MinimaxParameters {
@@ -18,8 +19,11 @@ const MINIMAX: MinimaxParameters = MinimaxParameters {
 };
 
 const RAVE: RaveParameters = RaveParameters {
-    c: 0.0,
+    c: 0.2,
     c_base: 19652,
+    c_factor: 2.2,
+    fpu_r: 1e-2,
+    b_squared: 0.35,
 };
 
 pub enum Enemy {

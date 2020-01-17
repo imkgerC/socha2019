@@ -1,34 +1,10 @@
-use super::mcts::MCTS;
+use super::mcts::{MCTS, RaveParameters};
 use super::piranhas::Piranhas;
 use game_sdk::gamerules;
 use game_sdk::ClientListener;
 use game_sdk::{GameState, Move};
 
 use time;
-
-#[derive(Clone)]
-pub struct RaveParameters {
-    pub c: f32,
-    pub c_base: usize,
-}
-
-impl RaveParameters {
-    pub fn empty() -> RaveParameters {
-        return RaveParameters { c: 0.0, c_base: 0 };
-    }
-
-    pub fn set_var_from_string(&mut self, identifier: String, val: String) {
-        match &identifier[..] {
-            "c" => {
-                self.c = val.parse().expect("Got wrong val");
-            }
-            "c_base" => {
-                self.c_base = val.parse().expect("Got wrong val");
-            }
-            _ => panic!("wrong identifier"),
-        };
-    }
-}
 
 #[derive(Clone)]
 pub struct RavePlayer {
@@ -50,7 +26,7 @@ impl ClientListener for RavePlayer {
             mcts.set_root(&game);
         // *mcts = MCTS::new(&game); // to deactivate taking knowledge over from last turn
         } else {
-            self.mcts = Some(MCTS::new(&game, self.params.c, self.params.c_base));
+            self.mcts = Some(MCTS::new(&game, self.params.clone()));
         }
         if let Some(ref mut mcts) = self.mcts {
             // mcts.search(1_000, c);

@@ -4,7 +4,7 @@ use game_sdk::logging::Winner;
 use logic_player::Player;
 #[allow(unused_imports)]
 use logic_player::{
-    LogicBasedPlayer, MinimaxPlayer, MultiDistancePlayer, RandomPlayer,
+    LogicBasedPlayer, MinimaxPlayer, MultiDistancePlayer,
     SingleDistancePlayer,
 };
 
@@ -28,7 +28,7 @@ pub fn run_tournament(threads: usize, n: u32, xml_enabled: bool) {
     let (t_winner, r_winner): (mpsc::Sender<EndState>, mpsc::Receiver<EndState>) = mpsc::channel();
 
     let pool = ThreadPool::new(threads);
-    let mut players: [Participant; 6] = [
+    let mut players: [Participant; 4] = [
         Participant::new(Player::MinimaxPlayer(MinimaxPlayer::new(None, 0))),
         Participant::new(Player::LogicBasedPlayer(LogicBasedPlayer::new(None, 0))),
         Participant::new(Player::SingleDistancePlayer(SingleDistancePlayer::new(
@@ -37,8 +37,6 @@ pub fn run_tournament(threads: usize, n: u32, xml_enabled: bool) {
         Participant::new(Player::MultiDistancePlayer(MultiDistancePlayer::new(
             None, 0,
         ))),
-        Participant::new(Player::RandomPlayer(RandomPlayer::new(None, 0))),
-        Participant::new(Player::RandomPlayer(RandomPlayer::new(None, 0))),
     ];
 
     let player_len = players.len() as u32;
@@ -48,8 +46,8 @@ pub fn run_tournament(threads: usize, n: u32, xml_enabled: bool) {
         for j in 0..games {
             let t_winner = t_winner.clone();
             let index = player_len * i + j;
-            let mut player_one = players[(2 * j) as usize].player.clone();
-            let mut player_two = players[(2 * j + 1) as usize].player.clone();
+            let player_one = players[(2 * j) as usize].player.clone();
+            let player_two = players[(2 * j + 1) as usize].player.clone();
             pool.execute(move || {
                 run_with_player(index, t_winner, player_one, player_two, xml_enabled);
             });

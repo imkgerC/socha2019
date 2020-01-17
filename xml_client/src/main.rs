@@ -9,7 +9,7 @@ mod xml_utils;
 use argparse::{ArgumentParser, Store};
 use xml_client::XMLClient;
 
-use logic_player::HybridPlayer as Player;
+use logic_player::RavePlayer as Player;
 
 fn main() {
 	let mut host = "localhost".to_string();

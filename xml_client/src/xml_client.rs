@@ -8,7 +8,7 @@ use std::io::{prelude::Write, BufReader, BufWriter};
 use std::net::TcpStream;
 
 pub struct XMLClient {
-	listeners: Vec<Box<ClientListener>>,
+	listeners: Vec<Box<dyn ClientListener>>,
 	my_color: Option<String>,
 	game_state: Option<GameState>,
 	room: Option<Room>,
@@ -24,7 +24,7 @@ impl XMLClient {
 		};
 	}
 
-	pub fn add_listener(&mut self, listener: Box<ClientListener>) {
+	pub fn add_listener(&mut self, listener: Box<dyn ClientListener>) {
 		self.listeners.push(listener);
 	}
 
@@ -50,11 +50,11 @@ impl XMLClient {
 		self.handle_stream(&stream);
 	}
 
-	fn fire_listeners(&mut self, notifier: &mut FnMut(&mut ClientListener)) {
+	fn fire_listeners(&mut self, notifier: &mut dyn FnMut(&mut dyn ClientListener)) {
 		let length = self.listeners.len();
 		for i in 0..length {
-			let mut boxed: &mut Box<ClientListener> = &mut self.listeners[i];
-			let mut reference = boxed.as_mut();
+			let boxed: &mut Box<dyn ClientListener> = &mut self.listeners[i];
+			let reference = boxed.as_mut();
 			notifier(reference);
 		}
 	}
@@ -79,7 +79,7 @@ impl XMLClient {
 						"welcomeMessage" => self.handle_welcome_message_node(&mut node),
 						"sc.framework.plugins.protocol.MoveRequest" => {
 							let mut default_listener = SimpleClientListener;
-							let mut move_req_listener: &mut ClientListener;
+							let move_req_listener: &mut dyn ClientListener;
 
 							if self.listeners.len() == 0 {
 								move_req_listener = &mut default_listener;
@@ -149,7 +149,7 @@ impl XMLClient {
 	}
 
 	fn get_move_upon_request(
-		move_req_listener: &mut ClientListener,
+		move_req_listener: &mut dyn ClientListener,
 		game_state: &GameState,
 	) -> Move {
 		return move_req_listener.on_move_request(game_state);

@@ -156,6 +156,7 @@ impl Helper {
         return greatest_pair;
     }
 
+    #[allow(unused)]
     pub fn get_swarms(state: &GameState, color: &PlayerColor) -> Vec<(u8, Vec<(u8, u8)>)> {
         let mut fields = state.board.get_fields_of(color);
         let mut res = Vec::with_capacity(4);

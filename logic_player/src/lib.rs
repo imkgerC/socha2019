@@ -12,10 +12,6 @@ mod mcts_rave;
 mod minimax;
 mod util;
 
-/*mod pleco_clone;
-pub use pleco_clone::search::Searcher;
-pub use pleco_clone::PlecoPlayer;*/
-
 pub use distance_player::MultiDistancePlayer;
 pub use distance_player::SingleDistancePlayer;
 pub use hybrid::HybridPlayer;
@@ -28,8 +24,6 @@ pub use minimax::MinimaxPlayer;
 use game_sdk::ClientListener;
 use game_sdk::GameState;
 use game_sdk::{gamerules, Move};
-use rand::rngs::SmallRng;
-use rand::{FromEntropy, Rng};
 
 mod clop_player;
 pub use clop_player::{ClopParameters, EnemyPool, ToClop};
@@ -39,7 +33,6 @@ use std::sync::mpsc;
 
 #[derive(Clone)]
 pub enum Player {
-	RandomPlayer(RandomPlayer),
 	LogicBasedPlayer(LogicBasedPlayer),
 	SingleDistancePlayer(SingleDistancePlayer),
 	MultiDistancePlayer(MultiDistancePlayer),
@@ -52,7 +45,6 @@ impl std::fmt::Display for Player {
 			f,
 			"{}",
 			match self {
-				Player::RandomPlayer(_) => "RandomPlayer",
 				Player::LogicBasedPlayer(_) => "LogicBasedPlayer",
 				Player::SingleDistancePlayer(_) => "SingleDistancePlayer",
 				Player::MultiDistancePlayer(_) => "MultiDistancePlayer",
@@ -65,37 +57,11 @@ impl std::fmt::Display for Player {
 impl ClientListener for Player {
 	fn on_move_request(&mut self, state: &GameState) -> Move {
 		return match self {
-			Player::RandomPlayer(p) => p.on_move_request(state),
 			Player::LogicBasedPlayer(p) => p.on_move_request(state),
 			Player::SingleDistancePlayer(p) => p.on_move_request(state),
 			Player::MultiDistancePlayer(p) => p.on_move_request(state),
 			Player::MinimaxPlayer(p) => p.on_move_request(state),
 		};
-	}
-}
-
-#[derive(Clone)]
-pub struct RandomPlayer {
-	rng: SmallRng,
-}
-
-impl RandomPlayer {
-	pub fn new(_: Option<mpsc::Sender<Data>>, _: i64) -> RandomPlayer {
-		return RandomPlayer {
-			rng: SmallRng::from_entropy(),
-		};
-	}
-}
-
-impl ClientListener for RandomPlayer {
-	fn on_move_request(&mut self, state: &GameState) -> Move {
-		let moves: Vec<Move> = state.get_move_list();
-		let rng_number: usize = self.rng.gen_range(0, moves.len());
-		if let Some(a) = moves.get(rng_number) {
-			return *a;
-		}
-		println!("{:?}", moves);
-		panic!("Did not find move for RandomPlayer");
 	}
 }
 
@@ -176,24 +142,24 @@ impl LogicBasedPlayer {
 		return var_x + var_y;
 	}
 
-	pub fn get_rated_moves(state: &GameState) -> Vec<(f32, Move)> {
+	pub fn get_rated_moves(state: &GameState) -> Vec<(i32, Move)> {
 		if gamerules::is_finished(state) {
 			return Vec::new();
 		}
 		let mut moves = state.get_move_list().into_iter();
 		let mut result = Vec::with_capacity(40);
 		let (squared_x, squared_y, x, y, len) = LogicBasedPlayer::get_sums(&state);
-		let mut sum = 0.;
+		// let mut sum = 0.;
 		while let Some(action_considered) = moves.next() {
 			let rate =
 				LogicBasedPlayer::easy_rate(squared_x, squared_y, x, y, len, &action_considered);
-			sum += rate as f32;
+			// sum += rate as f32;
 			result.push((rate, action_considered));
 		}
-		let result = result
+		/*let result = result
 			.into_iter()
 			.map(|(rate, action)| (rate as f32 / sum, action))
-			.collect();
+			.collect();*/
 		return result;
 	}
 
