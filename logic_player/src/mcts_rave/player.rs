@@ -33,7 +33,7 @@ impl RavePlayer {
             let before_samples = mcts.get_root_samples();
             let c = 0.038;
             // mcts.search(1000, c);
-            let budget_seconds = 0.05 - ((time::now() - before).num_milliseconds() as f32 / 1000.);
+            let budget_seconds = 0.1 - ((time::now() - before).num_milliseconds() as f32 / 1000.);
             mcts.search_time(budget_seconds, c);
             if let (Some(action), value, depth) = mcts.best_action() {
                 if let Some(ref tx) = self.tx {

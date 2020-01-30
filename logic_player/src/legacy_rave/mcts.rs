@@ -185,13 +185,18 @@ impl TreeNode {
         let mut n = 0.0;
         let mut q = 0.0;
 
-        let fpu_base = if is_root {1.5} else {(self.n - self.q) / self.n - 1e-2};
+        let fpu_r = -0.261;
+        let fpu_base = if is_root {
+            1.5
+        } else {
+            (self.n - self.q) / self.n - fpu_r
+        };
         let fpu_exploration = (self.n.ln() / 1.).sqrt();
         let mut best_value: f32 = f32::NEG_INFINITY;
         let mut best_child_index: Option<usize> = None;
-        let c_base = 19652.;
-        let b_squared = 0.35;
-        let c = c + 2.2 * ((1. + self.n + c_base) / c_base).ln();
+        let c_base = 7000.;
+        let b_squared = 0.788;
+        let c = c + 0.589 * ((1. + self.n + c_base) / c_base).ln();
         let mut non_terminal = 0;
         for (idx, edge) in self.children.iter_mut().enumerate() {
             if !edge.added {

@@ -21,13 +21,17 @@ impl MinimalState {
         };
     }
 
-    pub fn empty() -> MinimalState {
-        return MinimalState {
-            red_fields: 0,
-            blue_fields: 0,
-            turn: 255,
-        };
-    }
+    pub const EMPTY_STATE: MinimalState = MinimalState {
+        red_fields: 0,
+        blue_fields: 0,
+        turn: 255,
+    };
+
+    pub const INVALID: MinimalState = MinimalState {
+        red_fields: 42,
+        blue_fields: 1337,
+        turn: 255,
+    };
 }
 
 #[derive(Clone, Debug)]
@@ -53,10 +57,7 @@ impl Piranhas {
             return None;
         }
         let own_size = state.greatest_swarm_size(color);
-        let own_len = state
-            .board
-            .get_fields_of(color)
-            .count_ones() as u8;
+        let own_len = state.board.get_fields_of(color).count_ones() as u8;
         let other_size = state.greatest_swarm_size(&color.get_opponent_color());
         let other_len = state
             .board
@@ -101,7 +102,6 @@ impl Piranhas {
             false => return self.state.get_move_list(),
         };
     }
-    
     pub fn is_finished(&self) -> bool {
         return gamerules::is_finished(&self.state);
     }

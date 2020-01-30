@@ -86,20 +86,16 @@ pub struct TreeNode {
     index: MinimalState,
     parents: Vec<MinimalState>,
     children: Vec<ChildEdge>, // next steps we investigated
-    is_leaf: bool,            // is this a leaf node? fully expanded?
-    color: PlayerColor,
     n: f32,
     q: f32, // statistics for this game state
-    n_since_last_expansion: f32,
     lower_bound: f32,
-    last_update: u64,
     depth: Option<u8>,
     stats: Option<(i32, i32, i32)>,
 }
 
 impl TreeNode {
     /// Create and initialize a new TreeNode
-    pub fn new(color: PlayerColor, index: MinimalState, parent: Option<MinimalState>) -> TreeNode {
+    pub fn new(index: MinimalState, parent: Option<MinimalState>) -> TreeNode {
         let parents;
         if let Some(s) = parent {
             parents = vec![s];
@@ -110,15 +106,11 @@ impl TreeNode {
             index,
             parents,
             children: Vec::new(),
-            is_leaf: false,
-            color: color,
             n: 0.,
             q: 0.,
             lower_bound: -2.0,
             depth: None,
             stats: None,
-            n_since_last_expansion: 1.,
-            last_update: 0,
         }
     }
 
@@ -152,7 +144,6 @@ impl TreeNode {
     fn add_own_children(&mut self, game: &mut Piranhas) -> bool {
         let mut rated_actions = LogicBasedPlayer::get_rated_moves(&game.state);
         if rated_actions.len() == 0 {
-            self.is_leaf = true;
             self.depth = Some(0);
             return false;
         }
@@ -223,13 +214,12 @@ impl TreeNode {
             let node = node_table
                 .get(&edge.index)
                 .expect("ERROR: Did not find child in UCT");
-            if node.is_leaf {
+            if let Some(depth) = node.depth {
                 let value = node.q / node.n;
                 self.lower_bound = f32::max(self.lower_bound, value);
                 if value > 0.5 {
-                    self.is_leaf = true;
                     self.q = (1. - value) * self.n;
-                    self.depth = Some(node.depth.unwrap_or(0) + 1);
+                    self.depth = Some(depth + 1);
                     return (self.q / self.n, 1.0);
                 }
             } else {
@@ -250,7 +240,6 @@ impl TreeNode {
             }
         }
         if non_terminal == 0 {
-            self.is_leaf = true;
             best_value = self.lower_bound;
             for c in &self.children {
                 let child = node_table
@@ -271,15 +260,13 @@ impl TreeNode {
                 .get_mut(idx)
                 .expect("Should never happen, index is from iteration");
             if !edge.added {
-                self.n_since_last_expansion = 1.;
                 edge.added = true;
                 let mut node = TreeNode::new(
-                    self.color.get_opponent_color(),
                     edge.index.clone(),
                     Some(self.index),
                 );
                 game.make_move(&edge.action);
-                let delta = varianced_playout(game, &node.color, rave_table);
+                let delta = varianced_playout(game, &game.get_color(), rave_table);
                 n += 1.0;
                 q += 1.0 - delta;
                 node.backpropagate(delta, 1.0, node_table);
@@ -312,7 +299,6 @@ impl TreeNode {
                 val.n = delta_n;
                 rave_table.insert(edge.action.clone(), val);
             }
-            self.n_since_last_expansion += 1.;
             return (q, n);
         } else {
             panic!("wut");
@@ -383,9 +369,9 @@ impl TreeNode {
         is_root: bool,
     ) -> (f32, f32) {
         self.stats = None;
-        let (delta, n) = match self.is_leaf {
-            true => (self.q / self.n, 1.0),
-            false => self.best_child_fpu(game, c, node_table, rave_table, is_root),
+        let (delta, n) = match self.depth {
+            Some(_) => (self.q / self.n, 1.0),
+            None => self.best_child_fpu(game, c, node_table, rave_table, is_root),
         };
         self.backpropagate(delta, n, node_table);
         return (delta, n);
@@ -422,12 +408,11 @@ pub struct MCTS {
 impl MCTS {
     /// Create a new MCTS solver.
     pub fn new(game: &Piranhas) -> MCTS {
-        let color = game.get_color();
         let mut node_table = HashMap::with_capacity(100_000);
         let state = MinimalState::from_state(&game.state);
         node_table.insert(
             state,
-            TreeNode::new(color, state.clone(), Some(MinimalState::empty())),
+            TreeNode::new(state.clone(), Some(MinimalState::EMPTY_STATE)),
         );
         MCTS {
             root: state,
@@ -455,24 +440,23 @@ impl MCTS {
         let previous_root = self.root;
         self.game = game.clone();
         if let Some(mut node) = self.node_table.remove(&state) {
-            node.add_parent(MinimalState::empty());
-            if node.children.len() == 0 {
+            node.add_parent(MinimalState::EMPTY_STATE);
+            /*if node.children.len() == 0 {
                 node.is_leaf = false;
-            }
+            }*/
             self.root = state;
             self.node_table.insert(state, node);
         } else {
             self.node_table = HashMap::with_capacity(100_000);
-            let color = game.get_color();
             self.root = state;
             self.node_table.insert(
                 state,
-                TreeNode::new(color, state.clone(), Some(MinimalState::empty())),
+                TreeNode::new(state.clone(), Some(MinimalState::EMPTY_STATE)),
             );
         }
         if previous_root != self.root {
             if let Some(mut node) = self.node_table.remove(&previous_root) {
-                node.remove_parent(MinimalState::empty(), &mut self.node_table);
+                node.remove_parent(MinimalState::EMPTY_STATE, &mut self.node_table);
             }
         }
     }
@@ -545,14 +529,14 @@ impl MCTS {
                 let q = child.q;
                 let n = child.n;
                 let value = q / n;
-                if child.is_leaf {
+                if let Some(depth) = child.depth {
                     if value > 0.5 {
-                        return (Some(c.action.clone()), value, child.depth);
+                        return (Some(c.action.clone()), value, Some(depth));
                     }
                 }
-                if value >= best_value || best_action == None {
+                if n >= best_value || best_action == None {
                     best_action = Some(c.action.clone());
-                    best_value = value;
+                    best_value = n;
                     depth = child.depth;
                 }
             }
